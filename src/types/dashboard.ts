@@ -21,10 +21,10 @@ export interface DashboardCard {
 }
 
 export const CARD_CONFIG: Record<CardType, { title: string; icon: string; priority: number }> = {
-  today:          { title: "Today's Schedule",      icon: "📅", priority: 0 },
-  importance:     { title: "High Priority",          icon: "🔥", priority: 1 },
-  relevant_notes: { title: "Relevant Notes",         icon: "📝", priority: 2 },
-  recurring:      { title: "Recurring",              icon: "🔁", priority: 3 },
-  suggestions:    { title: "Suggestions",            icon: "💡", priority: 4 },
-  quick_wins:     { title: "Quick Wins",             icon: "⚡", priority: 5 },
+  today:          { title: "Today's Schedule",      icon: "event",                 priority: 0 },
+  importance:     { title: "High Priority",          icon: "local-fire-department", priority: 1 },
+  relevant_notes: { title: "Relevant Notes",         icon: "description",           priority: 2 },
+  recurring:      { title: "Recurring",              icon: "repeat",                priority: 3 },
+  suggestions:    { title: "Suggestions",            icon: "lightbulb-outline",     priority: 4 },
+  quick_wins:     { title: "Quick Wins",             icon: "bolt",                  priority: 5 },
 };

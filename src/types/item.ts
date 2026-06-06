@@ -132,6 +132,16 @@ export const PRIORITY_BASE_WEIGHT: Record<Priority, number> = {
   critical: 1.0,
 };
 
+// ── ID generation (RN-safe — no crypto global) ──
+
+let _counter = 0;
+function generateId(): string {
+  const a = Date.now().toString(36);
+  const b = Math.random().toString(36).slice(2, 10);
+  const c = (++_counter).toString(36);
+  return `${a}-${b}-${c}`;
+}
+
 // ── Factory helpers ────────────────────────
 
 export function createTaskBase(
@@ -140,7 +150,7 @@ export function createTaskBase(
 ): Omit<Task, "subtasks"> {
   const now = new Date().toISOString();
   return {
-    id: crypto.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+    id: generateId(),
     type: "task",
     title,
     content: "",
@@ -167,7 +177,7 @@ export function createTaskBase(
 export function createNoteBase(title: string): Note {
   const now = new Date().toISOString();
   return {
-    id: crypto.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+    id: generateId(),
     type: "note",
     title,
     content: "",

@@ -1,39 +1,65 @@
-import { useEffect, useState, useCallback } from "react";
+// ─────────────────────────────────────────────
+// Smart Todo — App Root
+// Material 3 Design · Full-screen capture · Timing animations
+// ─────────────────────────────────────────────
+
+import { useEffect, useState, useCallback, useRef } from "react";
 import {
   StyleSheet,
   Text,
   View,
-  FlatList,
-  TouchableOpacity,
-  Alert,
+  ScrollView,
   ActivityIndicator,
 } from "react-native";
 import { StatusBar } from "expo-status-bar";
+import { GestureHandlerRootView } from "react-native-gesture-handler";
+import {
+  BottomSheetModalProvider,
+  BottomSheetModal,
+} from "@gorhom/bottom-sheet";
+import { MaterialIcons } from "@expo/vector-icons";
+
 import { initDatabase } from "./src/services/database";
 import { useItemsStore } from "./src/store/itemsStore";
+import { useSmartDashboard } from "./src/hooks/useSmartDashboard";
+import type { Item, Task, Note } from "./src/types/item";
 import { isTask, isNote } from "./src/types/item";
-import type { Item, Task, Note, Priority } from "./src/types/item";
-import { displayDate, isOverdue } from "./src/utils/dateUtils";
+import { colors, typography, spacing, radius, elevation } from "./src/theme";
 
-// ── Priority badge colour ──────────────────
+// Dashboard
+import { DashboardSection } from "./src/components/dashboard/DashboardSection";
 
-const PRIORITY_COLORS: Record<Priority, string> = {
-  low: "#94a3b8",
-  medium: "#f59e0b",
-  high: "#f97316",
-  critical: "#ef4444",
-};
+// Capture (full-screen)
+import { CaptureFAB } from "./src/components/capture/CaptureFAB";
+import { TaskCaptureScreen } from "./src/components/capture/TaskCaptureScreen";
+import { NoteCaptureScreen } from "./src/components/capture/NoteCaptureScreen";
+
+// Detail (bottom sheet — for editing existing items)
+import { TaskDetailSheet } from "./src/components/detail/TaskDetailSheet";
+import { NoteDetailSheet } from "./src/components/detail/NoteDetailSheet";
 
 // ── App root ───────────────────────────────
 
 export default function App() {
   const [ready, setReady] = useState(false);
   const loadAll = useItemsStore((s) => s.loadAll);
-  const addTask = useItemsStore((s) => s.addTask);
-  const addNote = useItemsStore((s) => s.addNote);
+  const archiveItem = useItemsStore((s) => s.archiveItem);
   const completeTask = useItemsStore((s) => s.completeTask);
-  const deleteItem = useItemsStore((s) => s.deleteItem);
   const items = useItemsStore((s) => s.items);
+
+  // ── Capture screen state ───────────────
+  const [captureMode, setCaptureMode] = useState<"task" | "note" | null>(null);
+
+  // ── Detail bottom sheets (for editing) ─
+  const taskDetailRef = useRef<BottomSheetModal>(null);
+  const noteDetailRef = useRef<BottomSheetModal>(null);
+  const [selectedTask, setSelectedTask] = useState<Task | null>(null);
+  const [selectedNote, setSelectedNote] = useState<Note | null>(null);
+
+  // Dashboard
+  const { cards, stats } = useSmartDashboard(items);
+
+  // ── Init ──────────────────────────────────
 
   useEffect(() => {
     (async () => {
@@ -43,244 +69,256 @@ export default function App() {
     })();
   }, []);
 
-  // ── Quick-add handlers ─────────────────
+  // ── Capture handlers ─────────────────────
 
-  const handleAddTask = useCallback(() => {
-    addTask("New task", "medium");
-  }, [addTask]);
+  const openTaskCapture = useCallback(() => setCaptureMode("task"), []);
+  const openNoteCapture = useCallback(() => setCaptureMode("note"), []);
+  const closeCapture = useCallback(() => setCaptureMode(null), []);
 
-  const handleAddNote = useCallback(() => {
-    addNote("New note");
-  }, [addNote]);
+  // ── Item press → detail sheet ─────────────
+
+  const handleItemPress = useCallback((item: Item) => {
+    if (isTask(item)) {
+      setSelectedTask(item as Task);
+      setTimeout(() => taskDetailRef.current?.present(), 50);
+    } else if (isNote(item)) {
+      setSelectedNote(item as Note);
+      setTimeout(() => noteDetailRef.current?.present(), 50);
+    }
+  }, []);
+
+  // ── Swipe handlers ────────────────────────
 
   const handleComplete = useCallback(
-    (id: string) => {
-      completeTask(id);
-    },
+    (id: string) => { completeTask(id); },
     [completeTask]
   );
 
-  const handleDelete = useCallback(
-    (item: Item) => {
-      Alert.alert("Delete?", `Delete "${item.title}"?`, [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Delete",
-          style: "destructive",
-          onPress: () => deleteItem(item.id),
-        },
-      ]);
-    },
-    [deleteItem]
+  const handleArchive = useCallback(
+    (id: string) => { archiveItem(id); },
+    [archiveItem]
   );
 
-  // ── Render ─────────────────────────────
+  // ── Loading ───────────────────────────────
 
   if (!ready) {
     return (
-      <View style={styles.loader}>
-        <ActivityIndicator size="large" />
-        <Text style={styles.loaderText}>Setting up…</Text>
+      <View style={s.loader}>
+        <ActivityIndicator size="large" color={colors.primary} />
+        <Text style={s.loaderText}>Setting up…</Text>
       </View>
     );
   }
 
-  const activeItems = items.filter((i) => i.archivedAt === null);
-  const tasks = activeItems.filter(isTask);
-  const notes = activeItems.filter(isNote);
+  // ── Render ────────────────────────────────
+
+  const hasItems = items.filter((i) => i.archivedAt === null).length > 0;
 
   return (
-    <View style={styles.container}>
-      <StatusBar />
+    <GestureHandlerRootView style={s.root}>
+      <BottomSheetModalProvider>
+        <View style={s.container}>
+          <StatusBar style="dark" />
 
-      {/* ── Header ─────────────────────── */}
-      <View style={styles.header}>
-        <Text style={styles.title}>Smart Todo</Text>
-        <Text style={styles.subtitle}>
-          {tasks.length} task{tasks.length !== 1 ? "s" : ""} · {notes.length} note
-          {notes.length !== 1 ? "s" : ""}
-        </Text>
-      </View>
+          {/* ── Header ──────────────────────── */}
+          <View style={s.header}>
+            <Text style={s.appTitle}>Smart Todo</Text>
+            <Text style={s.appSubtitle}>Capture · Organize · Review</Text>
+            <View style={s.statsRow}>
+              <StatPill
+                label="Tasks"
+                value={stats.totalTasks}
+                iconName="assignment"
+                color={colors.primary}
+                containerColor={colors.primaryContainer}
+              />
+              <StatPill
+                label="Done"
+                value={stats.doneTasks}
+                iconName="check-circle"
+                color={colors.success}
+                containerColor={colors.successContainer}
+              />
+              <StatPill
+                label="Notes"
+                value={stats.totalNotes}
+                iconName="description"
+                color={colors.noteAccent}
+                containerColor={colors.noteAccentContainer}
+              />
+              {stats.overdueCount > 0 && (
+                <StatPill
+                  label="Overdue"
+                  value={stats.overdueCount}
+                  iconName="warning"
+                  color={colors.error}
+                  containerColor={colors.errorContainer}
+                />
+              )}
+            </View>
+          </View>
 
-      {/* ── Item list ──────────────────── */}
-      {activeItems.length === 0 ? (
-        <View style={styles.empty}>
-          <Text style={styles.emptyIcon}>📋</Text>
-          <Text style={styles.emptyTitle}>Nothing here yet</Text>
-          <Text style={styles.emptyBody}>
-            Tap a button below to capture a task or note.
-          </Text>
-        </View>
-      ) : (
-        <FlatList
-          data={activeItems}
-          keyExtractor={(i) => i.id}
-          contentContainerStyle={styles.list}
-          renderItem={({ item }) => (
-            <ItemRow
-              item={item}
-              onComplete={handleComplete}
-              onDelete={handleDelete}
-            />
+          {/* ── Dashboard ───────────────────── */}
+          {!hasItems ? (
+            <View style={s.empty}>
+              <View style={s.emptyIconContainer}>
+                <MaterialIcons name="auto-awesome" size={40} color={colors.primary} />
+              </View>
+              <Text style={s.emptyTitle}>Capture something</Text>
+              <Text style={s.emptyBody}>
+                A task, an idea, anything.{"\n"}Tap the + button below to get started.
+              </Text>
+            </View>
+          ) : (
+            <ScrollView
+              style={s.scrollView}
+              contentContainerStyle={s.scrollContent}
+              showsVerticalScrollIndicator={false}
+            >
+              {cards.map((card) => (
+                <DashboardSection
+                  key={card.type}
+                  card={card}
+                  onItemPress={handleItemPress}
+                  onItemComplete={handleComplete}
+                  onItemArchive={handleArchive}
+                />
+              ))}
+              <View style={{ height: 120 }} />
+            </ScrollView>
           )}
-        />
-      )}
 
-      {/* ── FAB row ────────────────────── */}
-      <View style={styles.fabRow}>
-        <TouchableOpacity style={[styles.fab, styles.fabTask]} onPress={handleAddTask}>
-          <Text style={styles.fabLabel}>＋ Task</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={[styles.fab, styles.fabNote]} onPress={handleAddNote}>
-          <Text style={styles.fabLabel}>＋ Note</Text>
-        </TouchableOpacity>
-      </View>
-    </View>
+          {/* ── FAB ─────────────────────────── */}
+          <CaptureFAB
+            onCaptureTask={openTaskCapture}
+            onCaptureNote={openNoteCapture}
+          />
+        </View>
+
+        {/* ── Full-screen capture overlays ──── */}
+        {captureMode === "task" && (
+          <TaskCaptureScreen onClose={closeCapture} />
+        )}
+        {captureMode === "note" && (
+          <NoteCaptureScreen onClose={closeCapture} />
+        )}
+
+        {/* ── Detail sheets (edit existing) ─── */}
+        <TaskDetailSheet
+          ref={taskDetailRef}
+          task={selectedTask}
+          onDismiss={() => setSelectedTask(null)}
+        />
+        <NoteDetailSheet
+          ref={noteDetailRef}
+          note={selectedNote}
+          onDismiss={() => setSelectedNote(null)}
+        />
+      </BottomSheetModalProvider>
+    </GestureHandlerRootView>
   );
 }
 
-// ── Item row component ─────────────────────
+// ── Stat pill ──────────────────────────────
 
-function ItemRow({
-  item,
-  onComplete,
-  onDelete,
+function StatPill({
+  label,
+  value,
+  iconName,
+  color,
+  containerColor,
 }: {
-  item: Item;
-  onComplete: (id: string) => void;
-  onDelete: (item: Item) => void;
+  label: string;
+  value: number;
+  iconName: string;
+  color: string;
+  containerColor: string;
 }) {
-  const task = isTask(item) ? (item as Task) : null;
-  const note = isNote(item) ? (item as Note) : null;
-
   return (
-    <TouchableOpacity
-      style={styles.card}
-      onLongPress={() => onDelete(item)}
-      activeOpacity={0.7}
-    >
-      {/* Left accent bar */}
-      {task && (
-        <View
-          style={[
-            styles.accent,
-            { backgroundColor: PRIORITY_COLORS[task.userPriority] },
-          ]}
-        />
-      )}
-      {note && <View style={[styles.accent, { backgroundColor: "#6366f1" }]} />}
-
-      <View style={styles.cardBody}>
-        <Text style={styles.cardTitle} numberOfLines={1}>
-          {item.title}
-        </Text>
-
-        {task && (
-          <View style={styles.metaRow}>
-            {task.dueDate && (
-              <Text
-                style={[
-                  styles.meta,
-                  isOverdue(task.dueDate) && styles.metaOverdue,
-                ]}
-              >
-                📅 {displayDate(task.dueDate)}
-              </Text>
-            )}
-            <Text style={[styles.meta, { color: PRIORITY_COLORS[task.userPriority] }]}>
-              {task.userPriority.toUpperCase()}
-            </Text>
-            <Text style={styles.meta}>{task.status}</Text>
-          </View>
-        )}
-
-        {note && note.content ? (
-          <Text style={styles.notePreview} numberOfLines={2}>
-            {note.content}
-          </Text>
-        ) : null}
-      </View>
-
-      {/* Complete button for tasks */}
-      {task && task.status !== "done" && (
-        <TouchableOpacity
-          style={styles.checkBtn}
-          onPress={() => onComplete(task.id)}
-        >
-          <Text style={styles.checkIcon}>✓</Text>
-        </TouchableOpacity>
-      )}
-    </TouchableOpacity>
+    <View style={[s.pill, { backgroundColor: containerColor }]}>
+      <MaterialIcons name={iconName as any} size={16} color={color} />
+      <Text style={[s.pillValue, { color }]}>{value}</Text>
+      <Text style={[s.pillLabel, { color }]}>{label}</Text>
+    </View>
   );
 }
 
 // ── Styles ─────────────────────────────────
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#f8fafc" },
-  loader: { flex: 1, justifyContent: "center", alignItems: "center" },
-  loaderText: { marginTop: 12, color: "#64748b" },
+const s = StyleSheet.create({
+  root: { flex: 1, backgroundColor: colors.surfaceDim },
+  container: { flex: 1, backgroundColor: colors.surfaceDim },
+  loader: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    backgroundColor: colors.surfaceDim,
+    gap: spacing.md,
+  },
+  loaderText: { ...typography.bodyLarge },
 
   // Header
-  header: { paddingTop: 60, paddingHorizontal: 20, paddingBottom: 12 },
-  title: { fontSize: 28, fontWeight: "700", color: "#0f172a" },
-  subtitle: { fontSize: 14, color: "#64748b", marginTop: 4 },
-
-  // Empty state
-  empty: { flex: 1, justifyContent: "center", alignItems: "center", padding: 40 },
-  emptyIcon: { fontSize: 48 },
-  emptyTitle: { fontSize: 18, fontWeight: "600", color: "#334155", marginTop: 16 },
-  emptyBody: { fontSize: 14, color: "#94a3b8", textAlign: "center", marginTop: 8 },
-
-  // List
-  list: { paddingHorizontal: 16, paddingBottom: 100 },
-
-  // Card
-  card: {
+  header: {
+    paddingTop: 56,
+    paddingHorizontal: spacing.xl,
+    paddingBottom: spacing.lg,
+    backgroundColor: colors.surface,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.outline,
+  },
+  appTitle: {
+    ...typography.displayLarge,
+  },
+  appSubtitle: {
+    ...typography.labelLarge,
+    color: colors.onSurfaceMuted,
+    marginTop: spacing.xs,
+  },
+  statsRow: {
+    flexDirection: "row",
+    gap: spacing.sm,
+    marginTop: spacing.lg,
+    flexWrap: "wrap",
+  },
+  pill: {
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "#fff",
-    borderRadius: 12,
-    marginBottom: 8,
-    overflow: "hidden",
-    elevation: 1,
-    shadowColor: "#000",
-    shadowOpacity: 0.05,
-    shadowRadius: 4,
-    shadowOffset: { width: 0, height: 2 },
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    borderRadius: radius.pill,
+    gap: spacing.xs,
   },
-  accent: { width: 4, alignSelf: "stretch" },
-  cardBody: { flex: 1, padding: 14 },
-  cardTitle: { fontSize: 15, fontWeight: "600", color: "#1e293b" },
-  metaRow: { flexDirection: "row", marginTop: 6, gap: 10 },
-  meta: { fontSize: 12, color: "#94a3b8" },
-  metaOverdue: { color: "#ef4444" },
-  notePreview: { fontSize: 13, color: "#64748b", marginTop: 4 },
+  pillValue: { ...typography.labelMedium, fontWeight: "700" },
+  pillLabel: { ...typography.labelMedium },
 
-  // Check button
-  checkBtn: { padding: 16 },
-  checkIcon: { fontSize: 20, color: "#22c55e", fontWeight: "700" },
+  // Empty state
+  empty: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    padding: spacing.xxxl,
+  },
+  emptyIconContainer: {
+    width: 80,
+    height: 80,
+    borderRadius: radius.xl,
+    backgroundColor: colors.primaryContainer,
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: spacing.xl,
+  },
+  emptyIcon: { fontSize: 40 },
+  emptyTitle: {
+    ...typography.titleLarge,
+    marginBottom: spacing.sm,
+  },
+  emptyBody: {
+    ...typography.bodyLarge,
+    textAlign: "center",
+    lineHeight: 24,
+  },
 
-  // FAB
-  fabRow: {
-    position: "absolute",
-    bottom: 40,
-    right: 20,
-    flexDirection: "column",
-    gap: 10,
-    alignItems: "flex-end",
-  },
-  fab: {
-    paddingHorizontal: 20,
-    paddingVertical: 14,
-    borderRadius: 28,
-    elevation: 4,
-    shadowColor: "#000",
-    shadowOpacity: 0.15,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: 4 },
-  },
-  fabTask: { backgroundColor: "#3b82f6" },
-  fabNote: { backgroundColor: "#6366f1" },
-  fabLabel: { color: "#fff", fontWeight: "700", fontSize: 15 },
+  // Scroll
+  scrollView: { flex: 1 },
+  scrollContent: { paddingTop: spacing.lg },
 });
