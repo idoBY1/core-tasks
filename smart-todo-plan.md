@@ -664,7 +664,6 @@ Notification payload includes:
 - [ ] Semantic search implementation
 - [ ] Importance scoring engine
 - [ ] Semantic linking engine
-- [ ] NLP date parsing for quick capture
 
 ### Phase 4: Advanced Features (Week 7-8)
 - [ ] Sub-task system (add, reorder, complete)

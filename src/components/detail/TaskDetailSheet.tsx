@@ -1,7 +1,10 @@
 // ─────────────────────────────────────────────
 // Smart Todo — Task Detail Sheet
-// No switches — date row with x to clear, time chips,
-// recurrence-aware date behavior.
+// No switches — date row with x to clear.
+// Due date only for non-recurring tasks.
+// Recurrence: daily=no date, weekly=day chips,
+// monthly=multi-day grid, none=free date.
+// Time picker: any minute of the day.
 // ─────────────────────────────────────────────
 
 import React, { useState, useCallback, useEffect, forwardRef, useMemo } from "react";
@@ -11,7 +14,6 @@ import {
   TextInput,
   TouchableOpacity,
   StyleSheet,
-  ScrollView,
   Alert,
 } from "react-native";
 import {
@@ -22,7 +24,8 @@ import {
 import Animated, { FadeIn, FadeOut } from "react-native-reanimated";
 import type { Task, Priority, TaskStatus, DayOfWeek } from "../../types/item";
 import { ImportanceSelector } from "../capture/ImportanceSelector";
-import { DatePicker } from "../capture/DatePicker";
+import { DatePickerModal, DateChip } from "../capture/DatePicker";
+import { TimePickerModal, TimeChip } from "../capture/TimePicker";
 import { RecurrencePicker, type RecurrenceValue } from "../capture/RecurrencePicker";
 import { ImportanceBadge } from "../shared/ImportanceBadge";
 import { useItemsStore } from "../../store/itemsStore";
@@ -44,19 +47,13 @@ const STATUS_OPTIONS: { value: TaskStatus; label: string; color: string }[] = [
   { value: "done", label: "Done", color: colors.success },
 ];
 
-const TIME_OPTIONS = [
-  "06:00", "07:00", "08:00", "09:00", "10:00", "11:00",
-  "12:00", "13:00", "14:00", "15:00", "16:00", "17:00",
-  "18:00", "19:00", "20:00", "21:00", "22:00",
-];
-
 function toRecurrenceValue(task: Task): RecurrenceValue {
   const r = task.recurrence;
-  if (!r) return { frequency: "none", daysOfWeek: [], dayOfMonth: null };
+  if (!r) return { frequency: "none", daysOfWeek: [], daysOfMonth: [] };
   return {
     frequency: r.frequency === "yearly" || r.frequency === "custom" ? "none" : r.frequency,
     daysOfWeek: (r.daysOfWeek as DayOfWeek[]) ?? [],
-    dayOfMonth: r.dayOfMonth ?? null,
+    daysOfMonth: r.daysOfMonth ?? (r.dayOfMonth ? [r.dayOfMonth] : []),
   };
 }
 
@@ -77,12 +74,14 @@ export const TaskDetailSheet = forwardRef<BottomSheetModal, Props>(
     const [priority, setPriority] = useState<Priority>("medium");
     const [status, setStatus] = useState<TaskStatus>("pending");
     const [dueDate, setDueDate] = useState<Date | null>(null);
-    const [showDatePicker, setShowDatePicker] = useState(false);
-    const [selectedTime, setSelectedTime] = useState<string | null>(null);
+    const [showDateModal, setShowDateModal] = useState(false);
+    const [selectedTime, setSelectedTime] = useState("09:00");
+    const [hasTime, setHasTime] = useState(false);
+    const [showTimeModal, setShowTimeModal] = useState(false);
     const [recurrence, setRecurrence] = useState<RecurrenceValue>({
       frequency: "none",
       daysOfWeek: [],
-      dayOfMonth: null,
+      daysOfMonth: [],
     });
 
     const snapPoints = useMemo(() => ["90%"], []);
@@ -100,12 +99,15 @@ export const TaskDetailSheet = forwardRef<BottomSheetModal, Props>(
           setDueDate(d);
           if (!task.isAllDay) {
             setSelectedTime(toTimeStr(d));
+            setHasTime(true);
           } else {
-            setSelectedTime(null);
+            setSelectedTime("09:00");
+            setHasTime(false);
           }
         } else {
           setDueDate(null);
-          setSelectedTime(null);
+          setSelectedTime("09:00");
+          setHasTime(false);
         }
       }
     }, [task]);
@@ -119,13 +121,10 @@ export const TaskDetailSheet = forwardRef<BottomSheetModal, Props>(
         status,
       };
 
-      // Due date
-      if (recurrence.frequency === "daily") {
-        updates.dueDate = null;
-        updates.isAllDay = true;
-      } else if (dueDate) {
+      // Due date — only for non-recurring tasks
+      if (recurrence.frequency === "none" && dueDate) {
         const d = new Date(dueDate);
-        if (selectedTime) {
+        if (hasTime) {
           const [h, m] = selectedTime.split(":").map(Number);
           d.setHours(h, m, 0, 0);
           updates.isAllDay = false;
@@ -144,7 +143,7 @@ export const TaskDetailSheet = forwardRef<BottomSheetModal, Props>(
           frequency: recurrence.frequency,
           interval: 1,
           daysOfWeek: recurrence.daysOfWeek.length > 0 ? recurrence.daysOfWeek : null,
-          dayOfMonth: recurrence.dayOfMonth,
+          daysOfMonth: recurrence.daysOfMonth.length > 0 ? recurrence.daysOfMonth : null,
         };
       } else {
         updates.recurrence = null;
@@ -152,7 +151,7 @@ export const TaskDetailSheet = forwardRef<BottomSheetModal, Props>(
 
       await updateTask(task.id, updates);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    }, [task, title, content, priority, status, dueDate, selectedTime, recurrence, updateTask]);
+    }, [task, title, content, priority, status, dueDate, selectedTime, hasTime, recurrence, updateTask]);
 
     const handleDismiss = useCallback(() => {
       save();
@@ -190,7 +189,7 @@ export const TaskDetailSheet = forwardRef<BottomSheetModal, Props>(
 
     if (!task) return null;
 
-    const showDateSection = recurrence.frequency !== "daily";
+    const showDateSection = recurrence.frequency === "none";
 
     return (
       <BottomSheetModal
@@ -234,51 +233,56 @@ export const TaskDetailSheet = forwardRef<BottomSheetModal, Props>(
           <Text style={styles.fieldLabel}>Importance</Text>
           <ImportanceSelector value={priority} onChange={setPriority} />
 
-          {/* ── Due Date ─────────────────────── */}
+          {/* ── Due Date (only when no recurrence) ── */}
           {showDateSection && (
             <Animated.View entering={FadeIn.duration(motion.fast)} exiting={FadeOut.duration(motion.fast)}>
               <Text style={[styles.fieldLabel, { marginTop: spacing.xl }]}>Due Date</Text>
               {dueDate ? (
-                <View style={styles.dateSelectedRow}>
-                  <MaterialIcons name="event" size={18} color={colors.primary} />
-                  <Text style={styles.dateSelectedText}>{format(dueDate, "EEE, MMM d, yyyy")}</Text>
-                  <TouchableOpacity onPress={() => { setDueDate(null); setSelectedTime(null); setShowDatePicker(false); }} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-                    <MaterialIcons name="close" size={18} color={colors.onSurfaceMuted} />
-                  </TouchableOpacity>
-                </View>
+                <DateChip
+                  date={dueDate}
+                  onPress={() => setShowDateModal(true)}
+                  onClear={() => { setDueDate(null); setHasTime(false); }}
+                />
               ) : (
-                <TouchableOpacity style={styles.dateAddRow} onPress={() => setShowDatePicker(true)} activeOpacity={0.6}>
-                  <MaterialIcons name="add" size={18} color={colors.primary} />
-                  <Text style={styles.dateAddText}>Set date</Text>
+                <TouchableOpacity style={styles.addRow} onPress={() => setShowDateModal(true)} activeOpacity={0.6}>
+                  <MaterialIcons name="event" size={18} color={colors.primary} />
+                  <Text style={styles.addText}>Set date</Text>
                 </TouchableOpacity>
               )}
 
-              {showDatePicker && !dueDate && (
-                <Animated.View entering={FadeIn.duration(motion.fast)} style={styles.datePickerContainer}>
-                  <DatePicker value={dueDate} onChange={(d) => { if (d) { setDueDate(d); setShowDatePicker(false); } }} />
-                </Animated.View>
-              )}
+              <DatePickerModal
+                visible={showDateModal}
+                value={dueDate}
+                onConfirm={(d) => { setDueDate(d); setShowDateModal(false); }}
+                onCancel={() => setShowDateModal(false)}
+              />
 
+              {/* Time picker — only if date chosen */}
               {dueDate && (
                 <Animated.View entering={FadeIn.duration(motion.fast)}>
-                  <View style={styles.timeHeader}>
-                    <Text style={styles.subLabel}>Time</Text>
-                    {selectedTime && (
-                      <TouchableOpacity onPress={() => setSelectedTime(null)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-                        <Text style={styles.clearTime}>Clear</Text>
-                      </TouchableOpacity>
-                    )}
-                  </View>
-                  <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.timeScrollContent}>
-                    {TIME_OPTIONS.map((t) => {
-                      const active = selectedTime === t;
-                      return (
-                        <TouchableOpacity key={t} style={[styles.timeChip, active && styles.timeChipActive]} onPress={() => setSelectedTime(active ? null : t)} activeOpacity={0.7}>
-                          <Text style={[styles.timeChipText, active && styles.timeChipTextActive]}>{t}</Text>
-                        </TouchableOpacity>
-                      );
-                    })}
-                  </ScrollView>
+                  {!hasTime ? (
+                    <TouchableOpacity
+                      style={styles.addRow}
+                      onPress={() => setShowTimeModal(true)}
+                      activeOpacity={0.6}
+                    >
+                      <MaterialIcons name="schedule" size={18} color={colors.primary} />
+                      <Text style={styles.addText}>Add time</Text>
+                    </TouchableOpacity>
+                  ) : (
+                    <TimeChip
+                      time={selectedTime}
+                      onPress={() => setShowTimeModal(true)}
+                      onClear={() => setHasTime(false)}
+                    />
+                  )}
+
+                  <TimePickerModal
+                    visible={showTimeModal}
+                    value={selectedTime}
+                    onConfirm={(t) => { setSelectedTime(t); setHasTime(true); setShowTimeModal(false); }}
+                    onCancel={() => setShowTimeModal(false)}
+                  />
                 </Animated.View>
               )}
             </Animated.View>
@@ -345,11 +349,6 @@ const styles = StyleSheet.create({
     ...typography.labelLarge,
     marginBottom: spacing.sm,
   },
-  subLabel: {
-    ...typography.bodyMedium,
-    fontWeight: "600",
-    color: colors.onSurfaceVariant,
-  },
   statusRow: {
     flexDirection: "row",
     gap: spacing.sm,
@@ -366,24 +365,8 @@ const styles = StyleSheet.create({
     ...typography.labelMedium,
   },
 
-  // Date row
-  dateSelectedRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: spacing.sm,
-    backgroundColor: colors.primaryContainer,
-    paddingVertical: spacing.md,
-    paddingHorizontal: spacing.lg,
-    borderRadius: radius.md,
-    marginBottom: spacing.sm,
-  },
-  dateSelectedText: {
-    ...typography.bodyLarge,
-    flex: 1,
-    color: colors.primary,
-    fontWeight: "600",
-  },
-  dateAddRow: {
+  // Date / Time rows
+  addRow: {
     flexDirection: "row",
     alignItems: "center",
     gap: spacing.sm,
@@ -393,47 +376,10 @@ const styles = StyleSheet.create({
     borderRadius: radius.md,
     marginBottom: spacing.sm,
   },
-  dateAddText: {
+  addText: {
     ...typography.bodyLarge,
     color: colors.primary,
     fontWeight: "600",
-  },
-  datePickerContainer: {
-    marginBottom: spacing.md,
-  },
-
-  // Time
-  timeHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    marginBottom: spacing.md,
-  },
-  clearTime: {
-    fontSize: 13,
-    fontWeight: "600",
-    color: colors.error,
-  },
-  timeScrollContent: {
-    gap: spacing.sm,
-    paddingBottom: spacing.sm,
-  },
-  timeChip: {
-    paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.sm,
-    borderRadius: radius.sm,
-    backgroundColor: colors.surfaceContainer,
-  },
-  timeChipActive: {
-    backgroundColor: colors.primary,
-  },
-  timeChipText: {
-    ...typography.bodyMedium,
-    fontWeight: "600",
-    color: colors.onSurfaceVariant,
-  },
-  timeChipTextActive: {
-    color: colors.onPrimary,
   },
 
   // Actions

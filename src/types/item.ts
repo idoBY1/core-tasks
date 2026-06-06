@@ -42,6 +42,7 @@ export interface RecurrenceRule {
   interval: number; // 1 = every occurrence, 2 = every other, etc.
   daysOfWeek?: DayOfWeek[] | null;
   dayOfMonth?: number | null;
+  daysOfMonth?: number[] | null;
   endDate?: string | null; // ISO 8601 — null means "forever"
   exceptions?: string[]; // ISO 8601 dates to skip
 }

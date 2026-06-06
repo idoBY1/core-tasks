@@ -14,7 +14,7 @@ export type RecurrenceOption = RecurrenceFrequency | "none";
 export interface RecurrenceValue {
   frequency: RecurrenceOption;
   daysOfWeek: DayOfWeek[];
-  dayOfMonth: number | null;
+  daysOfMonth: number[];
 }
 
 interface Props {
@@ -47,7 +47,7 @@ export function RecurrencePicker({ value, onChange }: Props) {
       onChange({
         frequency: freq,
         daysOfWeek: freq === "weekly" ? value.daysOfWeek : [],
-        dayOfMonth: freq === "monthly" ? value.dayOfMonth : null,
+        daysOfMonth: freq === "monthly" ? value.daysOfMonth : [],
       });
     },
     [value, onChange]
@@ -63,9 +63,12 @@ export function RecurrencePicker({ value, onChange }: Props) {
     [value, onChange]
   );
 
-  const setDayOfMonth = useCallback(
+  const toggleDayOfMonth = useCallback(
     (day: number) => {
-      onChange({ ...value, dayOfMonth: value.dayOfMonth === day ? null : day });
+      const next = value.daysOfMonth.includes(day)
+        ? value.daysOfMonth.filter((d) => d !== day)
+        : [...value.daysOfMonth, day];
+      onChange({ ...value, daysOfMonth: next });
     },
     [value, onChange]
   );
@@ -128,18 +131,18 @@ export function RecurrencePicker({ value, onChange }: Props) {
         </View>
       )}
 
-      {/* Monthly: day-of-month grid */}
+      {/* Monthly: day-of-month grid — multi-select */}
       {value.frequency === "monthly" && (
         <View style={styles.monthSection}>
-          <Text style={styles.subLabel}>On which day?</Text>
+          <Text style={styles.subLabel}>On which days? ({value.daysOfMonth.length} selected)</Text>
           <View style={styles.monthGrid}>
             {MONTH_DAYS.map((day) => {
-              const active = value.dayOfMonth === day;
+              const active = value.daysOfMonth.includes(day);
               return (
                 <TouchableOpacity
                   key={day}
                   style={[styles.monthDay, active && styles.monthDayActive]}
-                  onPress={() => setDayOfMonth(day)}
+                  onPress={() => toggleDayOfMonth(day)}
                   activeOpacity={0.7}
                 >
                   <Text style={[styles.monthDayText, active && styles.monthDayTextActive]}>
