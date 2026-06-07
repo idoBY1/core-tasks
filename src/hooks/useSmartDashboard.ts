@@ -1,6 +1,7 @@
 // ─────────────────────────────────────────────
 // Smart Todo — useSmartDashboard Hook
 // Computes which dashboard sections to show
+// Uses adaptive importance scoring for intelligent ranking
 // ─────────────────────────────────────────────
 
 import { useMemo } from "react";
@@ -8,6 +9,7 @@ import type { Item, Task, Note } from "../types/item";
 import { isTask, isNote } from "../types/item";
 import type { DashboardCard, CardType } from "../types/dashboard";
 import { CARD_CONFIG } from "../types/dashboard";
+import { calculateAdaptiveScore } from "../services/importanceScorer";
 import {
   isToday as checkIsToday,
   isTomorrow,
@@ -40,6 +42,7 @@ function isQuickWin(task: Task): boolean {
 
 export function useSmartDashboard(items: Item[]) {
   return useMemo(() => {
+    const now = new Date();
     const active = items.filter((i) => i.archivedAt === null);
     const activeTasks = active.filter(isTask).filter((t) => t.status !== "done");
     const allTasks = active.filter(isTask);
@@ -66,13 +69,14 @@ export function useSmartDashboard(items: Item[]) {
       });
     }
 
-    // 2. High Priority — top 5 by user priority then importance score
-    const priorityOrder = { critical: 0, high: 1, medium: 2, low: 3 };
+    // 2. High Priority — top 5 by adaptive importance score (descending)
+    //    The adaptive score combines user label, due urgency, dependency ratio,
+    //    semantic context, recency, and sibling pressure (see importanceScorer).
     const highPriority = [...activeTasks]
       .sort((a, b) => {
-        const pDiff = priorityOrder[a.userPriority] - priorityOrder[b.userPriority];
-        if (pDiff !== 0) return pDiff;
-        return b.importance - a.importance;
+        const scoreA = calculateAdaptiveScore(a, items, now);
+        const scoreB = calculateAdaptiveScore(b, items, now);
+        return scoreB - scoreA;
       })
       .slice(0, 5);
 
@@ -95,17 +99,55 @@ export function useSmartDashboard(items: Item[]) {
       });
     }
 
-    // 4. Recent Notes — last 5 updated notes
-    const recentNotes = active
-      .filter(isNote)
-      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
-      .slice(0, 5);
+    // 4. Relevant Notes — notes with semantic links to recently active tasks,
+    //    falling back to most recently updated notes
+    const recentTaskEmbeddings = activeTasks
+      .filter((t) => t.embedding && t.lastTouchedAt)
+      .sort(
+        (a, b) =>
+          (b.lastTouchedAt ?? "").localeCompare(a.lastTouchedAt ?? "")
+      )
+      .slice(0, 3)
+      .map((t) => t.embedding!);
 
-    if (recentNotes.length > 0) {
+    const activeNotes = active.filter(isNote);
+
+    let relevantNotes: Note[];
+    if (recentTaskEmbeddings.length > 0) {
+      // Score each note by max cosine similarity to any recent task
+      const notesWithScore = activeNotes
+        .filter((n) => n.embedding && n.embedding.length > 0)
+        .map((note) => {
+          let maxSim = 0;
+          for (const taskEmb of recentTaskEmbeddings) {
+            const sim = cosineSimilarity(note.embedding!, taskEmb);
+            if (sim > maxSim) maxSim = sim;
+          }
+          return { note, sim: maxSim };
+        })
+        .filter((ns) => ns.sim > 0.1);
+
+      notesWithScore.sort((a, b) => b.sim - a.sim);
+      relevantNotes = notesWithScore.slice(0, 5).map((ns) => ns.note);
+
+      // If no semantically similar notes found, fall back to recent
+      if (relevantNotes.length === 0) {
+        relevantNotes = activeNotes
+          .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+          .slice(0, 5);
+      }
+    } else {
+      // No task embeddings yet — fall back to recency
+      relevantNotes = activeNotes
+        .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+        .slice(0, 5);
+    }
+
+    if (relevantNotes.length > 0) {
       cards.push({
         type: "relevant_notes",
         ...CARD_CONFIG.relevant_notes,
-        items: recentNotes,
+        items: relevantNotes,
       });
     }
 
@@ -133,4 +175,19 @@ export function useSmartDashboard(items: Item[]) {
       stats: { totalTasks, doneTasks, totalNotes, overdueCount },
     };
   }, [items]);
+}
+
+// ── Local cosine similarity helper ─────────
+function cosineSimilarity(a: number[], b: number[]): number {
+  if (a.length !== b.length || a.length === 0) return 0;
+  let dot = 0;
+  let normA = 0;
+  let normB = 0;
+  for (let i = 0; i < a.length; i++) {
+    dot += a[i] * b[i];
+    normA += a[i] * a[i];
+    normB += b[i] * b[i];
+  }
+  const denom = Math.sqrt(normA) * Math.sqrt(normB);
+  return denom === 0 ? 0 : dot / denom;
 }

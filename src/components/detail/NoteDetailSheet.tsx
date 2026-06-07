@@ -19,7 +19,9 @@ import {
   BottomSheetScrollView,
 } from "@gorhom/bottom-sheet";
 import Animated, { FadeIn } from "react-native-reanimated";
-import type { Note, ChecklistItem } from "../../types/item";
+import { LinkedItemsList } from "../shared/LinkedItemsList";
+import { LinkSuggestionCard } from "../shared/LinkSuggestionCard";
+import type { Note, ChecklistItem, Item } from "../../types/item";
 import { useItemsStore } from "../../store/itemsStore";
 import { relativeTime } from "../../utils/dateUtils";
 import * as Haptics from "expo-haptics";
@@ -29,6 +31,7 @@ import { colors, typography, spacing, radius, elevation, motion } from "../../th
 interface Props {
   note: Note | null;
   onDismiss?: () => void;
+  onItemPress?: (item: Item) => void;
 }
 
 const NOTE_COLORS = [
@@ -37,9 +40,10 @@ const NOTE_COLORS = [
 ];
 
 export const NoteDetailSheet = forwardRef<BottomSheetModal, Props>(
-  ({ note, onDismiss }, ref) => {
+  ({ note, onDismiss, onItemPress }, ref) => {
     const updateNote = useItemsStore((s) => s.updateNote);
     const deleteItem = useItemsStore((s) => s.deleteItem);
+    const suggestions = useItemsStore((s) => s.linking.suggestions);
 
     const [title, setTitle] = useState("");
     const [content, setContent] = useState("");
@@ -48,6 +52,11 @@ export const NoteDetailSheet = forwardRef<BottomSheetModal, Props>(
     const [checklist, setChecklist] = useState<ChecklistItem[] | null>(null);
 
     const snapPoints = useMemo(() => ["90%"], []);
+
+    // Filter suggestions for this note
+    const noteSuggestions = suggestions.filter(
+      (sg) => sg.fromItem.id === note?.id || sg.toItem.id === note?.id
+    );
 
     // Sync from note
     useEffect(() => {
@@ -231,6 +240,28 @@ export const NoteDetailSheet = forwardRef<BottomSheetModal, Props>(
               />
             ))}
           </View>
+
+          {/* ── Linked Items ──────────────────── */}
+          {note && (
+            <>
+              <Text style={styles.fieldLabel}>Links</Text>
+              <LinkedItemsList itemId={note.id} onItemPress={(item) => onItemPress?.(item)} />
+            </>
+          )}
+
+          {/* ── Link Suggestions ──────────────── */}
+          {noteSuggestions.length > 0 && (
+            <View style={{ gap: spacing.sm, marginTop: spacing.md }}>
+              {noteSuggestions.slice(0, 3).map((sg) => (
+                <LinkSuggestionCard
+                  key={`${sg.fromItem.id}-${sg.toItem.id}`}
+                  fromItem={sg.fromItem.id === note?.id ? sg.fromItem : sg.toItem}
+                  toItem={sg.fromItem.id === note?.id ? sg.toItem : sg.fromItem}
+                  similarity={sg.similarity}
+                />
+              ))}
+            </View>
+          )}
 
           {/* Delete */}
           <View style={styles.actionsRow}>

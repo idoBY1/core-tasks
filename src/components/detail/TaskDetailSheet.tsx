@@ -22,12 +22,14 @@ import {
   BottomSheetScrollView,
 } from "@gorhom/bottom-sheet";
 import Animated, { FadeIn, FadeOut } from "react-native-reanimated";
-import type { Task, Priority, TaskStatus, DayOfWeek } from "../../types/item";
+import type { Task, Priority, TaskStatus, DayOfWeek, Item } from "../../types/item";
 import { ImportanceSelector } from "../capture/ImportanceSelector";
 import { DatePickerModal, DateChip } from "../capture/DatePicker";
 import { TimePickerModal, TimeChip } from "../capture/TimePicker";
 import { RecurrencePicker, type RecurrenceValue } from "../capture/RecurrencePicker";
 import { ImportanceBadge } from "../shared/ImportanceBadge";
+import { LinkedItemsList } from "../shared/LinkedItemsList";
+import { LinkSuggestionCard } from "../shared/LinkSuggestionCard";
 import { useItemsStore } from "../../store/itemsStore";
 import { relativeTime } from "../../utils/dateUtils";
 import * as Haptics from "expo-haptics";
@@ -38,6 +40,7 @@ import { format } from "date-fns";
 interface Props {
   task: Task | null;
   onDismiss?: () => void;
+  onItemPress?: (item: Item) => void;
 }
 
 const STATUS_OPTIONS: { value: TaskStatus; label: string; color: string }[] = [
@@ -64,10 +67,12 @@ function toTimeStr(date: Date): string {
 }
 
 export const TaskDetailSheet = forwardRef<BottomSheetModal, Props>(
-  ({ task, onDismiss }, ref) => {
+  ({ task, onDismiss, onItemPress }, ref) => {
     const updateTask = useItemsStore((s) => s.updateTask);
     const deleteItem = useItemsStore((s) => s.deleteItem);
     const completeTask = useItemsStore((s) => s.completeTask);
+    const suggestions = useItemsStore((s) => s.linking.suggestions);
+    const activeItems = useItemsStore((s) => s.items);
 
     const [title, setTitle] = useState("");
     const [content, setContent] = useState("");
@@ -85,6 +90,11 @@ export const TaskDetailSheet = forwardRef<BottomSheetModal, Props>(
     });
 
     const snapPoints = useMemo(() => ["90%"], []);
+
+    // Filter suggestions for this task
+    const taskSuggestions = suggestions.filter(
+      (sg) => sg.fromItem.id === task?.id || sg.toItem.id === task?.id
+    );
 
     // Sync from task
     useEffect(() => {
@@ -291,6 +301,24 @@ export const TaskDetailSheet = forwardRef<BottomSheetModal, Props>(
           {/* ── Recurrence ───────────────────── */}
           <Text style={[styles.fieldLabel, { marginTop: spacing.xl }]}>Repeat</Text>
           <RecurrencePicker value={recurrence} onChange={setRecurrence} />
+
+          {/* ── Linked Items ──────────────────── */}
+          <Text style={[styles.fieldLabel, { marginTop: spacing.xl }]}>Links</Text>
+          <LinkedItemsList itemId={task.id} onItemPress={(item) => onItemPress?.(item)} />
+
+          {/* ── Link Suggestions ──────────────── */}
+          {taskSuggestions.length > 0 && (
+            <View style={{ gap: spacing.sm, marginTop: spacing.md }}>
+              {taskSuggestions.slice(0, 3).map((sg) => (
+                <LinkSuggestionCard
+                  key={`${sg.fromItem.id}-${sg.toItem.id}`}
+                  fromItem={sg.fromItem.id === task.id ? sg.fromItem : sg.toItem}
+                  toItem={sg.fromItem.id === task.id ? sg.toItem : sg.fromItem}
+                  similarity={sg.similarity}
+                />
+              ))}
+            </View>
+          )}
 
           {/* Actions */}
           <View style={styles.actionsRow}>

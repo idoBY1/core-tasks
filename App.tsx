@@ -18,6 +18,7 @@ import {
   BottomSheetModal,
 } from "@gorhom/bottom-sheet";
 import { MaterialIcons } from "@expo/vector-icons";
+import { TouchableOpacity } from "react-native";
 
 import { initDatabase } from "./src/services/database";
 import { useItemsStore } from "./src/store/itemsStore";
@@ -38,10 +39,14 @@ import { NoteCaptureScreen } from "./src/components/capture/NoteCaptureScreen";
 import { TaskDetailSheet } from "./src/components/detail/TaskDetailSheet";
 import { NoteDetailSheet } from "./src/components/detail/NoteDetailSheet";
 
+// Search
+import { SearchOverlay } from "./src/components/search/SearchOverlay";
+
 // ── App root ───────────────────────────────
 
 export default function App() {
   const [ready, setReady] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
   const loadAll = useItemsStore((s) => s.loadAll);
   const archiveItem = useItemsStore((s) => s.archiveItem);
   const completeTask = useItemsStore((s) => s.completeTask);
@@ -65,6 +70,8 @@ export default function App() {
     (async () => {
       await initDatabase();
       await loadAll();
+      // Initialize intelligence layer (TF-IDF embeddings)
+      useItemsStore.getState().initIntelligence();
       setReady(true);
     })();
   }, []);
@@ -122,8 +129,19 @@ export default function App() {
 
           {/* ── Header ──────────────────────── */}
           <View style={s.header}>
-            <Text style={s.appTitle}>Smart Todo</Text>
-            <Text style={s.appSubtitle}>Capture · Organize · Review</Text>
+            <View style={s.headerRow}>
+              <View style={{ flex: 1 }}>
+                <Text style={s.appTitle}>Smart Todo</Text>
+                <Text style={s.appSubtitle}>Capture · Organize · Review</Text>
+              </View>
+              <TouchableOpacity
+                style={s.searchBtn}
+                onPress={() => setSearchOpen(true)}
+                activeOpacity={0.7}
+              >
+                <MaterialIcons name="search" size={22} color={colors.onSurfaceVariant} />
+              </TouchableOpacity>
+            </View>
             <View style={s.statsRow}>
               <StatPill
                 label="Tasks"
@@ -208,11 +226,20 @@ export default function App() {
           ref={taskDetailRef}
           task={selectedTask}
           onDismiss={() => setSelectedTask(null)}
+          onItemPress={handleItemPress}
         />
         <NoteDetailSheet
           ref={noteDetailRef}
           note={selectedNote}
           onDismiss={() => setSelectedNote(null)}
+          onItemPress={handleItemPress}
+        />
+
+        {/* ── Search overlay ──────────────── */}
+        <SearchOverlay
+          visible={searchOpen}
+          onClose={() => setSearchOpen(false)}
+          onItemPress={handleItemPress}
         />
       </BottomSheetModalProvider>
     </GestureHandlerRootView>
@@ -265,6 +292,18 @@ const s = StyleSheet.create({
     backgroundColor: colors.surface,
     borderBottomWidth: 1,
     borderBottomColor: colors.outline,
+  },
+  headerRow: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  searchBtn: {
+    width: 44,
+    height: 44,
+    borderRadius: radius.pill,
+    backgroundColor: colors.surfaceContainer,
+    alignItems: "center",
+    justifyContent: "center",
   },
   appTitle: {
     ...typography.displayLarge,
